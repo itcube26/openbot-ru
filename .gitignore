@@ -1,0 +1,28 @@
+/vendor
+composer.phar
+composer.lock
+.phpunit.result.cache
+/phpunit.xml
+.DS_Store
+Thumbs.db
+wandb/
+
+# IDE's
+.idea/
+/.vscode
+.classpath
+.project
+.settings/
+
+# build
+/bin
+/node_modules/
+
+/caches
+/wrapper
+controller/flutter/android/build
+/daemon
+kotlin-profile
+native
+jdks
+/robot/android/FakeDependency.jar
