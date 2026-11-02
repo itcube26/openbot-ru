@@ -30,6 +30,25 @@
 // ---------------------------------------------------------------------------
 
 //------------------------------------------------------//
+// VEX V5 MOTOR EXPANSION
+//------------------------------------------------------//
+// Set VEX_V5 to 1 to drive VEX V5 Smart Motors over a V5 Motor Controller
+// (I2C address 0x3c) instead of PWM motor drivers. The phone link stays the
+// same: BLE UART on ESP32 (see esp32_buildin/Инструкция по управлению
+// по bluetooth.md), USB serial on Arduino Nano. See openbot-v5.ino for a
+// minimal example and vexv5_examples/ for the raw motor control sketches.
+#define VEX_V5 0
+#if VEX_V5
+#include <Wire.h>
+const int PIN_V5_I2C_SDA = 21;         // ESP32 SDA -> controller SDA
+const int PIN_V5_I2C_SCL = 22;         // ESP32 SCL -> controller SCL
+const uint8_t V5_CONTROLLER_ADDR = 0x3c;
+const uint8_t V5_PORT_LEFT = 1;        // left motors plugged into port 1
+const uint8_t V5_PORT_RIGHT = 20;      // right motors plugged into port 20
+void v5_set_motor(uint8_t port, int speed);  // defined below, used in setup()
+#endif
+
+//------------------------------------------------------//
 // SETTINGS - set these for your robot
 //------------------------------------------------------//
 // To keep your settings across firmware updates, copy this section (between
@@ -580,7 +599,9 @@ struct PinUse {
   char part;
 };
 constexpr PinUse PIN_USES[] = {
-#if (OPENBOT == RC_CAR)
+#if VEX_V5
+  // Motors hang off the I2C bus, they do not occupy any GPIO pins.
+#elif (OPENBOT == RC_CAR)
   { PIN_PWM_T, 'M' }, { PIN_PWM_S, 'M' },
 #elif (OPENBOT == MTV)
   { PIN_PWM_L, 'M' }, { PIN_PWM_R, 'M' }, { PIN_DIR_L, 'M' }, { PIN_DIR_R, 'M' },
@@ -907,7 +928,12 @@ void setup() {
   coast_mode = !coast_mode;
 #endif
   // Motors first, so they are stopped as early as possible after boot
-#if (OPENBOT == RC_CAR)
+#if VEX_V5
+  // VEX V5 Motor Controller on I2C; no PWM pins needed for the motors.
+  Wire.begin(PIN_V5_I2C_SDA, PIN_V5_I2C_SCL);
+  v5_set_motor(V5_PORT_LEFT, 0);
+  v5_set_motor(V5_PORT_RIGHT, 0);
+#elif (OPENBOT == RC_CAR)
   pinMode(PIN_PWM_T, OUTPUT);
   pinMode(PIN_PWM_S, OUTPUT);
   // Attach the ESC and SERVO
@@ -1339,7 +1365,13 @@ void update_explore() {
 #endif
 
 void update_vehicle() {
-#if (OPENBOT == RC_CAR)
+#if VEX_V5
+  // VEX V5 Smart Motors via the V5 Motor Controller (I2C). The controller
+  // expects a signed 8-bit speed per port, -127..127; OpenBot's ctrl values
+  // are -255..255, so we scale them down. See vexv5_examples for details.
+  v5_set_motor(V5_PORT_LEFT, ctrl_left / 2);
+  v5_set_motor(V5_PORT_RIGHT, ctrl_right / 2);
+#elif (OPENBOT == RC_CAR)
   update_throttle();
   update_steering();
 #elif (OPENBOT == MTV)
@@ -1350,6 +1382,26 @@ void update_vehicle() {
   update_right_motors();
 #endif
 }
+
+#if VEX_V5
+// Send a signed speed (-127..127) to one port of the V5 Motor Controller.
+// Protocol: register 0x02 = left byte, 0x03 = right byte of a 16-bit value:
+//   bit 15        : reverse flag
+//   bits 14-7     : unused
+//   bits 6-0      : speed magnitude (0..127)
+void v5_set_motor(uint8_t port, int speed) {
+  if (speed > 127) speed = 127;
+  if (speed < -127) speed = -127;
+  uint16_t reg = 0;
+  if (speed < 0) reg |= 0x8000;  // reverse
+  reg |= (uint16_t)abs(speed);
+  Wire.beginTransmission(V5_CONTROLLER_ADDR);
+  Wire.write((uint8_t)(port * 2));       // high byte register of the port
+  Wire.write((uint8_t)(reg >> 8));
+  Wire.write((uint8_t)(reg & 0xff));
+  Wire.endTransmission();
+}
+#endif
 
 #if (OPENBOT == RC_CAR)
 void update_throttle() {
@@ -1677,8 +1729,13 @@ void show_gamepad_state(bool rumble) {
 #if HAS_BUMPER
 void emergency_stop() {
   bumper_event = true;
+#if VEX_V5
+  v5_set_motor(V5_PORT_LEFT, 0);
+  v5_set_motor(V5_PORT_RIGHT, 0);
+#else
   stop_left_motors();
   stop_right_motors();
+#endif
   ctrl_left = 0;
   ctrl_right = 0;
 #if HAS_INDICATORS
