@@ -119,17 +119,35 @@ void v5_set_motor(uint8_t port, int speed);  // defined below, used in setup()
 //------------------------------------------------------//
 
 //MCUs
-#define NANO 328 //Atmega328p
-#define ESP32 32 //ESP32
+#define NANO 328    //Atmega328p
+#define MEGA 2560   //Atmega2560
+#define ESP32 32    //ESP32
 
 // The MCU is detected from the board selected in the Arduino IDE:
-// Nano: "Arduino Nano", ESP32: "ESP32 Dev Module" (esp32 board package 2.0.17)
+// Nano: "Arduino Nano", Mega: "Arduino Mega or Mega 2560",
+// ESP32: "ESP32 Dev Module" (esp32 board package 2.0.17)
 #if defined(ARDUINO_ARCH_ESP32)
 #define MCU ESP32
+#elif defined(__AVR_ATmega2560__)
+#define MCU MEGA
 #elif defined(__AVR_ATmega328P__)
 #define MCU NANO
 #else
-#error "Unsupported board. Select Arduino Nano or ESP32 Dev Module."
+#error "Unsupported board. Select Arduino Nano, Arduino Mega or Mega 2560, or ESP32 Dev Module."
+#endif
+
+// AVR helper macros (shared by Nano and Mega):
+// - attachPinChangeInterrupt: on Mega we use ordinary external interrupts
+//   (INT0-INT5), which exist for all the sensor pins used below;
+// - analogWriteRange: Mega's Timer/Counter 1 and 5 are 16-bit (PWM values
+//   would reach 65535), so we clamp them to the same 0..255 range as the Nano.
+#if (MCU == MEGA)
+#define attachPinChangeInterrupt attachInterrupt
+#define detachPinChangeInterrupt detachInterrupt
+#define digitalPinToPinChangeInterrupt digitalPinToInterrupt
+#define PWM_LIMIT(v) ((v) > 255 ? 255 : (v))
+#else
+#define PWM_LIMIT(v) (v)
 #endif
 
 //Robot bodies          Boards
@@ -180,7 +198,25 @@ const String robot_type = "DIY";
 #define DEFAULT_HAS_SPEED_SENSORS_FRONT 1
 #define DEFAULT_VOLTAGE_LOW 9.0f
 #define DEFAULT_VOLTAGE_MAX 12.6f
-#if (MCU == NANO)
+#if (MCU == MEGA)
+// DIY on an Arduino Mega 2560: the Nano pins are remapped to Mega PWM-capable
+// and external-interrupt-capable pins (INT0..INT5 exist on Mega too).
+#define DEFAULT_VOLTAGE_MIN 2.5f
+#define DEFAULT_VOLTAGE_DIVIDER_FACTOR ((20 + 10) / 10)
+const float ADC_FACTOR = 5.0 / 1023;
+const int PIN_PWM_L1 = 8;   // Mega pin 8  (PCIE0 / OC4B)
+const int PIN_PWM_L2 = 9;   // Mega pin 9  (PCIE1 / OC4A)
+const int PIN_PWM_R1 = 10;  // Mega pin 10 (PCIE2 / OC4C)
+const int PIN_PWM_R2 = 11;  // Mega pin 11 (OC1A)
+const int PIN_SPEED_LF = 2;  // Mega INT0
+const int PIN_SPEED_RF = 3;  // Mega INT1
+const int PIN_VIN = A7;
+const int PIN_TRIGGER = 12;
+const int PIN_ECHO = 13;
+const int PIN_LED_LI = 4;
+const int PIN_LED_RI = 7;
+
+#elif (MCU == NANO)
 #define DEFAULT_VOLTAGE_MIN 2.5f
 #define DEFAULT_VOLTAGE_DIVIDER_FACTOR ((20 + 10) / 10)
 const float ADC_FACTOR = 5.0 / 1023;
@@ -251,8 +287,8 @@ const int PIN_LED_B = 13;
 //-------------------------PCB_V1-----------------------//
 #elif (OPENBOT == PCB_V1)
 const String robot_type = "PCB_V1";
-#if (MCU != NANO)
-#error "PCB_V1 needs an Arduino Nano board."
+#if !(MCU == NANO || MCU == MEGA)
+#error "PCB_V1 needs an Arduino Nano or Mega board."
 #endif
 #define DEFAULT_HAS_VOLTAGE_DIVIDER 1
 #define DEFAULT_VOLTAGE_DIVIDER_FACTOR ((100 + 33) / 33)
@@ -278,8 +314,8 @@ const int PIN_LED_RI = 8;
 //-------------------------PCB_V2-----------------------//
 #elif (OPENBOT == PCB_V2)
 const String robot_type = "PCB_V2";
-#if (MCU != NANO)
-#error "PCB_V2 needs an Arduino Nano board."
+#if !(MCU == NANO || MCU == MEGA)
+#error "PCB_V2 needs an Arduino Nano or Mega board."
 #endif
 #define DEFAULT_HAS_VOLTAGE_DIVIDER 1
 #define DEFAULT_VOLTAGE_DIVIDER_FACTOR ((20 + 10) / 10)
@@ -305,8 +341,8 @@ const int PIN_LED_RI = 8;
 //-------------------------RTR_TT-----------------------//
 #elif (OPENBOT == RTR_TT)
 const String robot_type = "RTR_TT";
-#if (MCU != NANO)
-#error "RTR_TT needs an Arduino Nano board."
+#if !(MCU == NANO || MCU == MEGA)
+#error "RTR_TT needs an Arduino Nano or Mega board."
 #endif
 #define DEFAULT_HAS_VOLTAGE_DIVIDER 1
 #define DEFAULT_VOLTAGE_DIVIDER_FACTOR ((30 + 10) / 10)
@@ -357,8 +393,8 @@ const int BUMPER_RB = 561;
 //-------------------------RC_CAR-----------------------//
 #elif (OPENBOT == RC_CAR)
 const String robot_type = "RC_CAR";
-#if (MCU != NANO)
-#error "RC_CAR needs an Arduino Nano board."
+#if !(MCU == NANO || MCU == MEGA)
+#error "RC_CAR needs an Arduino Nano or Mega board."
 #endif
 #include <Servo.h>
 Servo ESC;
@@ -379,8 +415,8 @@ const int PIN_LED_RI = 8;
 //-------------------------LITE-------------------------//
 #elif (OPENBOT == LITE)
 const String robot_type = "LITE";
-#if (MCU != NANO)
-#error "LITE needs an Arduino Nano board."
+#if !(MCU == NANO || MCU == MEGA)
+#error "LITE needs an Arduino Nano or Mega board."
 #endif
 #define DEFAULT_VOLTAGE_MIN 2.5f
 #define DEFAULT_VOLTAGE_LOW 4.5f
@@ -605,7 +641,7 @@ constexpr PinUse PIN_USES[] = {
   { PIN_PWM_T, 'M' }, { PIN_PWM_S, 'M' },
 #elif (OPENBOT == MTV)
   { PIN_PWM_L, 'M' }, { PIN_PWM_R, 'M' }, { PIN_DIR_L, 'M' }, { PIN_DIR_R, 'M' },
-#elif (MCU == NANO)
+#elif (MCU == NANO || MCU == MEGA)
   { PIN_PWM_L1, 'M' }, { PIN_PWM_L2, 'M' }, { PIN_PWM_R1, 'M' }, { PIN_PWM_R2, 'M' },
 #else
   { PIN_PWM_LF1, 'M' }, { PIN_PWM_LF2, 'M' }, { PIN_PWM_LB1, 'M' }, { PIN_PWM_LB2, 'M' },
@@ -790,7 +826,7 @@ bool gamepad_obstacle_stop = true;
 #endif
 
 #if (MCU == NANO && (HAS_SONAR || HAS_SPEED_SENSORS_FRONT || HAS_SPEED_SENSORS_BACK || HAS_SPEED_SENSORS_MIDDLE))
-#include "PinChangeInterrupt.h"
+#include "PinChangeInterrupt.h"  // only the Nano needs it, the Mega has hardware INTs on the sensor pins
 #endif
 
 #if (HAS_SONAR)
@@ -948,7 +984,7 @@ void setup() {
   pinMode(PIN_DIR_R, OUTPUT);
   digitalWrite(PIN_DIR_L, LOW);
   digitalWrite(PIN_DIR_R, LOW);
-#elif (MCU == NANO)
+#elif (MCU == NANO || MCU == MEGA)
   pinMode(PIN_PWM_L1, OUTPUT);
   pinMode(PIN_PWM_L2, OUTPUT);
   pinMode(PIN_PWM_R1, OUTPUT);
@@ -1055,7 +1091,11 @@ void setup() {
 
 #endif
 
+#if (MCU == ESP32)
   Serial.begin(115200, SERIAL_8N1);
+#else
+  Serial.begin(115200);
+#endif
   // SERIAL_8E1 - 8 data bits, even parity, 1 stop bit
   // SERIAL_8O1 - 8 data bits, odd parity, 1 stop bit
   // SERIAL_8N1 - 8 data bits, no parity, 1 stop bit
@@ -1111,7 +1151,7 @@ void print_config() {
   bool first = true;
   Serial.print(F("OpenBot "));
   Serial.print(robot_type);
-  Serial.print(MCU == NANO ? F(" (Nano):") : F(" (ESP32):"));
+  Serial.print((MCU == NANO || MCU == MEGA) ? F(" (AVR):") : F(" (ESP32):"));
 #if (HAS_VOLTAGE_DIVIDER)
   print_item(F("voltage"), first);
 #endif
@@ -1479,11 +1519,11 @@ void coast_right_motors_mtv() {
 
 void update_left_motors() {
   if (ctrl_left < 0) {
-    analogWrite(PIN_PWM_L1, -ctrl_left);
-    analogWrite(PIN_PWM_L2, 0);
+    analogWrite(PIN_PWM_L1, PWM_LIMIT(-ctrl_left));
+    analogWrite(PIN_PWM_L2, PWM_LIMIT(0));
   } else if (ctrl_left > 0) {
-    analogWrite(PIN_PWM_L1, 0);
-    analogWrite(PIN_PWM_L2, ctrl_left);
+    analogWrite(PIN_PWM_L1, PWM_LIMIT(0));
+    analogWrite(PIN_PWM_L2, PWM_LIMIT(ctrl_left));
   } else {
     if (coast_mode) {
       coast_left_motors();
@@ -1494,22 +1534,22 @@ void update_left_motors() {
 }
 
 void stop_left_motors() {
-  analogWrite(PIN_PWM_L1, 255);
-  analogWrite(PIN_PWM_L2, 255);
+  analogWrite(PIN_PWM_L1, PWM_LIMIT(255));
+  analogWrite(PIN_PWM_L2, PWM_LIMIT(255));
 }
 
 void coast_left_motors() {
-  analogWrite(PIN_PWM_L1, 0);
-  analogWrite(PIN_PWM_L2, 0);
+  analogWrite(PIN_PWM_L1, PWM_LIMIT(0));
+  analogWrite(PIN_PWM_L2, PWM_LIMIT(0));
 }
 
 void update_right_motors() {
   if (ctrl_right < 0) {
-    analogWrite(PIN_PWM_R1, -ctrl_right);
-    analogWrite(PIN_PWM_R2, 0);
+    analogWrite(PIN_PWM_R1, PWM_LIMIT(-ctrl_right));
+    analogWrite(PIN_PWM_R2, PWM_LIMIT(0));
   } else if (ctrl_right > 0) {
-    analogWrite(PIN_PWM_R1, 0);
-    analogWrite(PIN_PWM_R2, ctrl_right);
+    analogWrite(PIN_PWM_R1, PWM_LIMIT(0));
+    analogWrite(PIN_PWM_R2, PWM_LIMIT(ctrl_right));
   } else {
     if (coast_mode) {
       coast_right_motors();
@@ -1520,13 +1560,13 @@ void update_right_motors() {
 }
 
 void stop_right_motors() {
-  analogWrite(PIN_PWM_R1, 255);
-  analogWrite(PIN_PWM_R2, 255);
+  analogWrite(PIN_PWM_R1, PWM_LIMIT(255));
+  analogWrite(PIN_PWM_R2, PWM_LIMIT(255));
 }
 
 void coast_right_motors() {
-  analogWrite(PIN_PWM_R1, 0);
-  analogWrite(PIN_PWM_R2, 0);
+  analogWrite(PIN_PWM_R1, PWM_LIMIT(0));
+  analogWrite(PIN_PWM_R2, PWM_LIMIT(0));
 }
 
 #endif
